@@ -76,16 +76,24 @@ class PortalTest extends TestCase
         $this->assertDatabaseCount('payments', 1);
         $this->post($url, array_merge($form, ['amount' => '1']))->assertStatus(409);
         $id = DB::table('payments')->value('id');
+        $this->post($url, ['request_key' => (string) Str::uuid(), 'amount' => '250'])->assertRedirect('/');
         $this->signIn('parent@cedar.test');
-        $this->get('/')->assertOk()->assertSee('₹7,000.00');
+        $this->get('/')->assertOk()->assertSee('₹6,750.00');
+        $this->get("/receipts/$id/print")->assertOk()->assertSee('INR 7,000.00')->assertDontSee('INR 6,750.00');
+        $pdf = $this->get("/receipts/$id/pdf")->assertOk()->assertHeader('Content-Type', 'application/pdf');
+        $this->assertStringStartsWith('%PDF-', $pdf->getContent());
         $this->get("/receipts/$id")->assertOk()->assertSee('INR 5,000.00')
             ->assertHeader('Content-Disposition', "attachment; filename=\"receipt-R-$id.txt\"");
         $this->post($url, $form)->assertForbidden();
         $this->signIn('parent2@cedar.test');
         $this->get("/receipts/$id")->assertNotFound();
+        $this->get("/receipts/$id/print")->assertNotFound();
+        $this->get("/receipts/$id/pdf")->assertNotFound();
         $this->signIn('accountant@willow.test');
         $this->get('/')->assertOk()->assertDontSee('Mina Shah');
         $this->get("/receipts/$id")->assertNotFound();
+        $this->get("/receipts/$id/print")->assertNotFound();
+        $this->get("/receipts/$id/pdf")->assertNotFound();
         $this->post($url, $form)->assertNotFound();
     }
 

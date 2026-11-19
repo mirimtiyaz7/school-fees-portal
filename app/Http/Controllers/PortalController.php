@@ -2,6 +2,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use Dompdf\Dompdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -123,14 +124,45 @@ class PortalController
         return redirect()->route('home')->with('status', "Payment recorded. Receipt R-$id is available below.");
     }
 
-    public function receipt(Request $request, int $payment)
+    private function receiptData(Request $request, int $payment)
     {
         $row = $this->accounts($request->user())
             ->join('payments', 'payments.account_id', '=', 'accounts.id')
             ->join('schools', 'schools.id', '=', 'accounts.school_id')
             ->where('payments.id', $payment)
-            ->first(['schools.name', 'accounts.student', 'payments.amount_paise', 'payments.created_at']);
+            ->select('schools.name', 'accounts.student', 'accounts.fee_paise', 'payments.id', 'payments.amount_paise', 'payments.created_at')
+            ->selectSub(DB::table('payments as posted')->selectRaw('sum(posted.amount_paise)')
+                ->whereColumn('posted.account_id', 'accounts.id')
+                ->whereColumn('posted.id', '<=', 'payments.id'), 'collected')
+            ->first();
         abort_unless($row, 404);
+        return $row;
+    }
+
+    public function printReceipt(Request $request, int $payment)
+    {
+        $receipt = $this->receiptData($request, $payment);
+        return response()->view('receipt', ['receipt' => $receipt, 'pdf' => false])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function pdfReceipt(Request $request, int $payment)
+    {
+        $receipt = $this->receiptData($request, $payment);
+        $pdf = new Dompdf();
+        $pdf->loadHtml(view('receipt', ['receipt' => $receipt, 'pdf' => true])->render(), 'UTF-8');
+        $pdf->setPaper('A4');
+        $pdf->render();
+        return response($pdf->output(), 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="receipt-R-'.$payment.'.pdf"',
+            'Cache-Control' => 'private, no-store',
+        ]);
+    }
+
+    public function receipt(Request $request, int $payment)
+    {
+        $row = $this->receiptData($request, $payment);
         $amount = number_format($row->amount_paise / 100, 2);
         $body = "$row->name\nSchool fee receipt R-$payment\n\nStudent: $row->student\nAmount received: INR $amount\nRecorded: $row->created_at\n";
         return response($body)->header('Content-Type', 'text/plain; charset=UTF-8')

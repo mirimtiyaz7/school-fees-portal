@@ -28,7 +28,8 @@
 <h2>Payment receipts</h2><div class="card">
 @forelse($payments as $payment)
 <div class="receipt"><div><strong>{{ $payment->student }}</strong><small>R-{{ $payment->id }} · {{ substr($payment->created_at, 0, 10) }}</small></div>
-<b>{{ $money($payment->amount_paise) }}</b><a href="{{ url('/receipts/'.$payment->id) }}">Download receipt</a></div>
+<b>{{ $money($payment->amount_paise) }}</b><a href="{{ route('receipts.print', $payment->id) }}">View / print</a>
+<a href="{{ route('receipts.pdf', $payment->id) }}">Download PDF</a></div>
 @empty<p>Receipts will appear here when a payment is recorded.</p>@endforelse
 @if($payments->hasPages())<nav aria-label="Receipt pages">@if($payments->previousPageUrl())<a href="{{ $payments->previousPageUrl() }}">Previous</a>@endif
 Page {{ $payments->currentPage() }} of {{ $payments->lastPage() }}
