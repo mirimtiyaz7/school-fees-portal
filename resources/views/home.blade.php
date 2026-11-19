@@ -3,6 +3,12 @@
 @section('content')
 <p class="eyebrow">{{ $school }} · {{ ucfirst($user->role) }}</p>
 <h1>{{ $user->role === 'accountant' ? 'Fee collections' : 'Family fee statement' }}</h1>
+<form method="get" action="{{ route('home') }}" class="search">
+<label for="student-search">Search students by name</label>
+<div class="entry"><input type="search" id="student-search" name="q" maxlength="120" value="{{ $search }}"><button>Search</button></div>
+@if($search !== '')<a href="{{ route('home') }}">Clear search</a><p>Balances and receipts for matching students</p>@endif
+</form>
+@if($user->role === 'accountant')<p><a href="{{ route('students.create') }}">Add student</a></p>@endif
 @php($money = fn ($paise) => '₹'.number_format($paise / 100, 2))
 <section class="summary" aria-label="Summary">
 <div>Total fees<strong>{{ $money($accounts->sum('fee_paise')) }}</strong></div>
@@ -18,7 +24,7 @@
 <label for="amount{{ $account->id }}">Payment amount (₹)</label>
 <div class="entry"><input required type="number" step="0.01" min="0.01" max="{{ number_format(($account->fee_paise - $account->paid)/100, 2, '.', '') }}" id="amount{{ $account->id }}" name="amount"><button>Record payment</button></div></form>
 @endif</article>
-@empty<p>No student accounts are assigned yet.</p>@endforelse</div>
+@empty<p>{{ $search !== '' ? 'No matching students found.' : 'No student accounts are assigned yet.' }}</p>@endforelse</div>
 <h2>Payment receipts</h2><div class="card">
 @forelse($payments as $payment)
 <div class="receipt"><div><strong>{{ $payment->student }}</strong><small>R-{{ $payment->id }} · {{ substr($payment->created_at, 0, 10) }}</small></div>

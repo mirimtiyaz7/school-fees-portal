@@ -5,6 +5,7 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class PortalController
@@ -40,14 +41,56 @@ class PortalController
     {
         $user = $request->user();
         $school = DB::table('schools')->where('id', $user->school_id)->value('name');
-        $accounts = $this->accounts($user)->select('accounts.*')
+        $filters = $request->validate(['q' => 'nullable|string|max:120']);
+        $search = trim($filters['q'] ?? '');
+        $visible = $this->accounts($user);
+        if ($search !== '') {
+            $visible->whereRaw('strpos(lower(accounts.student), lower(?)) > 0', [$search]);
+        }
+        $accounts = (clone $visible)->select('accounts.*')
             ->selectSub(DB::table('payments')->selectRaw('coalesce(sum(amount_paise),0)')
                 ->whereColumn('account_id', 'accounts.id'), 'paid')
             ->orderBy('student')->get();
-        $payments = DB::table('payments')->whereIn('account_id', $this->accounts($user)->select('id'))
+        $payments = DB::table('payments')->whereIn('account_id', $visible->select('id'))
             ->join('accounts', 'accounts.id', '=', 'payments.account_id')
-            ->select('payments.*', 'accounts.student')->orderByDesc('payments.id')->paginate(15);
-        return view('home', compact('accounts', 'payments', 'school', 'user'));
+            ->select('payments.*', 'accounts.student')->orderByDesc('payments.id')->paginate(15)->withQueryString();
+        return view('home', compact('accounts', 'payments', 'school', 'user', 'search'));
+    }
+
+    public function createStudent(Request $request)
+    {
+        $user = $request->user();
+        abort_unless($user->role === 'accountant', 403);
+        $parents = User::where('school_id', $user->school_id)->where('role', 'parent')
+            ->orderBy('email')->get(['id', 'name', 'email']);
+        return view('student-create', compact('parents'));
+    }
+
+    public function storeStudent(Request $request)
+    {
+        $user = $request->user();
+        abort_unless($user->role === 'accountant', 403);
+        $data = $request->validate([
+            'student' => ['required', 'string', 'max:120'],
+            'parent_id' => ['required', 'integer', Rule::exists('users', 'id')
+                ->where('school_id', $user->school_id)->where('role', 'parent')],
+            'fee' => ['required', 'string', 'regex:/^[0-9]{1,8}(?:\.[0-9]{1,2})?$/D'],
+        ]);
+        $fee = $this->toPaise($data['fee']);
+        if ($fee < 1) {
+            throw ValidationException::withMessages(['fee' => 'Enter a fee greater than zero.']);
+        }
+        DB::table('accounts')->insert([
+            'school_id' => $user->school_id, 'parent_id' => $data['parent_id'],
+            'student' => $data['student'], 'fee_paise' => $fee,
+        ]);
+        return redirect()->route('home', ['q' => $data['student']])->with('status', 'Student added.');
+    }
+
+    private function toPaise(string $amount): int
+    {
+        [$whole, $fraction] = array_pad(explode('.', $amount), 2, '');
+        return (int) $whole * 100 + (int) str_pad($fraction, 2, '0');
     }
 
     public function pay(Request $request, int $account)
@@ -58,8 +101,7 @@ class PortalController
             'amount' => ['required', 'string', 'regex:/^[0-9]{1,8}(?:\.[0-9]{1,2})?$/D'],
             'request_key' => 'required|uuid',
         ]);
-        [$whole, $fraction] = array_pad(explode('.', $data['amount']), 2, '');
-        $paise = (int) $whole * 100 + (int) str_pad($fraction, 2, '0');
+        $paise = $this->toPaise($data['amount']);
         $id = DB::transaction(function () use ($user, $account, $data, $paise) {
             $row = $this->accounts($user)->where('id', $account)->lockForUpdate()->first();
             abort_unless($row, 404);

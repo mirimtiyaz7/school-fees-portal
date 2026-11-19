@@ -38,6 +38,34 @@ class PortalTest extends TestCase
         $this->assertGuest();
     }
 
+    public function test_accountant_can_add_a_student_and_parent_can_search_by_partial_name(): void
+    {
+        $this->signIn('accountant@cedar.test');
+        $this->get('/students/create')->assertOk()->assertSee('parent@cedar.test')->assertDontSee('parent@willow.test');
+        $parent = User::where('email', 'parent@cedar.test')->firstOrFail();
+        $this->post('/students', ['student' => 'Sara Mir', 'parent_id' => $parent->id, 'fee' => '1299.25'])
+            ->assertRedirect(route('home', ['q' => 'Sara Mir']));
+        $this->assertDatabaseHas('accounts', ['student' => 'Sara Mir', 'fee_paise' => 129925, 'parent_id' => $parent->id]);
+        $this->signIn('parent@cedar.test');
+        $this->get('/?q=ARA')->assertOk()->assertSee('Sara Mir')->assertDontSee('Mina Shah');
+        $this->signIn('parent2@cedar.test');
+        $this->get('/?q=sara')->assertOk()->assertSee('No matching students found.');
+    }
+
+    public function test_student_creation_requires_an_accountant_and_a_parent_at_the_same_school(): void
+    {
+        $this->signIn('accountant@cedar.test');
+        $form = ['student' => 'Sara Mir', 'fee' => '100'];
+        foreach (['parent@willow.test', 'accountant@cedar.test'] as $email) {
+            $form['parent_id'] = User::where('email', $email)->value('id');
+            $this->post('/students', $form)->assertSessionHasErrors('parent_id');
+        }
+        $this->signIn('parent@cedar.test');
+        $this->get('/students/create')->assertForbidden();
+        $this->post('/students', $form)->assertForbidden();
+        $this->assertDatabaseMissing('accounts', ['student' => 'Sara Mir']);
+    }
+
     public function test_partial_payment_retry_and_receipt_visibility(): void
     {
         $this->signIn('accountant@cedar.test');
